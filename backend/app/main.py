@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from .core.config import settings
 from .core.database import engine, Base
-from .api import documents, chat, auth
+from .api import documents, chat, auth, health
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -29,6 +29,11 @@ app.add_middleware(
         "http://localhost:5173",  # Vite development server
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        "http://localhost",       # Docker frontend
+        "http://localhost:80",    # Docker frontend explicit port
+        "https://localhost",      # HTTPS version
+        # Add your domain here for production
+        # "https://yourdomain.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -36,6 +41,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(health.router)  # Health check first
 app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(chat.router)
@@ -46,10 +52,6 @@ async def root():
     return {
         "message": "ContextProvider API",
         "version": "1.0.0",
-        "docs": "/docs"
-    }
-
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"} 
+        "docs": "/docs",
+        "health": "/health"
+    } 
