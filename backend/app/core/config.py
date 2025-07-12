@@ -12,6 +12,16 @@ class Settings(BaseSettings):
     max_file_size: int = 10485760  # 10MB
     allowed_extensions: List[str] = ["csv", "txt", "pdf"]
     
+    # Google OAuth Configuration
+    google_client_id: str
+    google_client_secret: str
+    google_redirect_uri: str
+    
+    # JWT Configuration
+    jwt_secret_key: str = ""
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 1440  # 24 hours
+    
     class Config:
         env_file = ".env"
 

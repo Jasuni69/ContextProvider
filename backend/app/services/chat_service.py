@@ -1,114 +1,143 @@
-from typing import List, Dict, Any, Tuple
-import os
+import openai
+from typing import List, Tuple, Optional
 from ..core.config import settings
+from ..services.vector_service import VectorService
+
 
 class ChatService:
     def __init__(self):
-        self.openai_api_key = settings.openai_api_key
-        self.use_openai = bool(self.openai_api_key)
-        
-        if self.use_openai:
-            try:
-                import openai
-                self.openai_client = openai.OpenAI(api_key=self.openai_api_key)
-            except ImportError:
-                print("OpenAI package not installed. Using fallback responses.")
-                self.use_openai = False
+        self.vector_service = VectorService()
+        if settings.openai_api_key:
+            openai.api_key = settings.openai_api_key
     
-    def generate_response(self, query: str, search_results: List[Dict[str, Any]]) -> Tuple[str, List[str]]:
-        """
-        Generate a response based on the query and search results
-        """
-        if not search_results:
-            return self._no_results_response(query)
-        
-        # Extract sources
-        sources = []
-        context_chunks = []
-        
-        for result in search_results:
-            if result.get('metadata', {}).get('filename'):
-                sources.append(result['metadata']['filename'])
-            context_chunks.append(result['document'])
-        
-        # Remove duplicates while preserving order
-        sources = list(dict.fromkeys(sources))
-        
-        if self.use_openai:
-            response = self._generate_openai_response(query, context_chunks)
-        else:
-            response = self._generate_fallback_response(query, context_chunks)
-        
-        return response, sources
-    
-    def _generate_openai_response(self, query: str, context_chunks: List[str]) -> str:
-        """Generate response using OpenAI"""
+    def get_document_response(self, query: str, document_id: int, user_id: int) -> Tuple[str, float]:
+        """Get AI response based on document content"""
         try:
-            # Prepare context
-            context = "\n\n".join(context_chunks[:3])  # Use top 3 chunks
+            # Search for relevant chunks in the specific document
+            collection_id = f"doc_{document_id}"
             
-            # Create prompt
-            prompt = f"""Based on the following context from uploaded documents, please answer the user's question. If the context doesn't contain relevant information, say so clearly.
+            search_results = self.vector_service.search_documents(
+                collection_id=collection_id,
+                query=query,
+                n_results=5,
+                user_filter={"user_id": user_id}
+            )
+            
+            if not search_results or not search_results.get('documents'):
+                return "I couldn't find relevant information in the document to answer your question.", 0.0
+            
+            # Extract relevant chunks and calculate average relevance
+            relevant_chunks = search_results['documents'][0]  # First result set
+            distances = search_results.get('distances', [[1.0] * len(relevant_chunks)])[0]
+            
+            # Convert distances to relevance scores (lower distance = higher relevance)
+            relevance_scores = [1.0 - min(dist, 1.0) for dist in distances]
+            avg_relevance = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0.0
+            
+            # Create context from relevant chunks
+            context = "\n\n".join(relevant_chunks[:3])  # Use top 3 chunks
+            
+            # Generate response using OpenAI
+            if settings.openai_api_key:
+                response = self._generate_openai_response(query, context)
+            else:
+                response = self._generate_fallback_response(query, context)
+            
+            return response, avg_relevance
+            
+        except Exception as e:
+            return f"I apologize, but I encountered an error while processing your question: {str(e)}", 0.0
+    
+    def get_general_response(self, query: str) -> str:
+        """Get general AI response without document context"""
+        try:
+            if settings.openai_api_key:
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful AI assistant. Provide clear, concise, and accurate responses."},
+                        {"role": "user", "content": query}
+                    ],
+                    max_tokens=500,
+                    temperature=0.7
+                )
+                return response.choices[0].message.content.strip()
+            else:
+                return self._generate_general_fallback_response(query)
+                
+        except Exception as e:
+            return f"I apologize, but I encountered an error: {str(e)}"
+    
+    def _generate_openai_response(self, query: str, context: str) -> str:
+        """Generate response using OpenAI with document context"""
+        try:
+            prompt = f"""Based on the following document content, please answer the user's question. If the information is not available in the provided context, please say so clearly.
 
-Context:
+Document Content:
 {context}
 
-Question: {query}
+User Question: {query}
 
-Answer:"""
-            
-            response = self.openai_client.chat.completions.create(
+Please provide a clear, accurate answer based on the document content:"""
+
+            response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that answers questions based on provided document context. Be concise and accurate."},
+                    {"role": "system", "content": "You are a helpful AI assistant that answers questions based on provided document content. Be accurate and cite the information when possible."},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=500,
-                temperature=0.7
+                temperature=0.3
             )
             
             return response.choices[0].message.content.strip()
             
         except Exception as e:
-            print(f"OpenAI API error: {e}")
-            return self._generate_fallback_response(query, context_chunks)
+            return f"I apologize, but I encountered an error generating the response: {str(e)}"
     
-    def _generate_fallback_response(self, query: str, context_chunks: List[str]) -> str:
-        """Generate a simple response without OpenAI"""
-        
-        # Simple keyword matching and response generation
+    def _generate_fallback_response(self, query: str, context: str) -> str:
+        """Generate fallback response when OpenAI is not available"""
+        # Simple keyword-based response generation
         query_lower = query.lower()
+        context_lower = context.lower()
         
-        # Find the most relevant chunk
-        best_chunk = ""
-        best_score = 0
+        # Check if query keywords appear in context
+        query_words = set(query_lower.split())
+        context_words = set(context_lower.split())
         
-        for chunk in context_chunks:
-            chunk_lower = chunk.lower()
-            # Simple scoring based on keyword matches
-            score = sum(1 for word in query_lower.split() if word in chunk_lower)
-            if score > best_score:
-                best_score = score
-                best_chunk = chunk
+        common_words = query_words.intersection(context_words)
         
-        if best_chunk:
-            # Extract a relevant snippet (first 200 characters)
-            snippet = best_chunk[:200] + "..." if len(best_chunk) > 200 else best_chunk
-            return f"Based on the uploaded documents, here's what I found:\n\n{snippet}"
-        else:
-            return "I found some relevant information in your documents, but I need more context to provide a specific answer. Could you please rephrase your question or be more specific?"
+        if len(common_words) >= 2:
+            # Find sentences containing query keywords
+            sentences = context.split('.')
+            relevant_sentences = []
+            
+            for sentence in sentences:
+                sentence_lower = sentence.lower()
+                if any(word in sentence_lower for word in query_words):
+                    relevant_sentences.append(sentence.strip())
+            
+            if relevant_sentences:
+                return f"Based on the document, here's what I found: {' '.join(relevant_sentences[:2])}"
+        
+        return "I found some relevant information in the document, but I cannot provide a specific answer without more advanced AI capabilities. Please check the document content directly."
     
-    def _no_results_response(self, query: str) -> Tuple[str, List[str]]:
-        """Response when no search results are found"""
-        response = "I couldn't find any relevant information in your uploaded documents to answer that question. Please make sure you have uploaded documents that contain information related to your query."
-        return response, []
+    def _generate_general_fallback_response(self, query: str) -> str:
+        """Generate general fallback response when OpenAI is not available"""
+        return "I'm currently operating in limited mode without access to advanced AI capabilities. Please configure OpenAI API key for better responses, or try asking about specific documents you've uploaded."
     
-    def _extract_keywords(self, text: str) -> List[str]:
-        """Simple keyword extraction"""
-        # Remove common stop words and extract meaningful terms
-        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those'}
-        
-        words = text.lower().split()
-        keywords = [word.strip('.,!?;:"()[]{}') for word in words if word.lower() not in stop_words and len(word) > 2]
-        
-        return keywords[:10]  # Return top 10 keywords 
+    def get_conversation_summary(self, messages: List[dict]) -> str:
+        """Generate a summary of the conversation for session titles"""
+        try:
+            if not messages or not settings.openai_api_key:
+                return "Chat Session"
+            
+            # Get first few messages to create a meaningful title
+            first_message = messages[0].get('content', '')
+            if len(first_message) > 50:
+                return first_message[:47] + "..."
+            
+            return first_message or "Chat Session"
+            
+        except Exception:
+            return "Chat Session" 

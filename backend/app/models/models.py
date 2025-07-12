@@ -1,78 +1,73 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, ForeignKey, Float
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-from ..core.database import Base
+from datetime import datetime
+
+Base = declarative_base()
 
 
 class User(Base):
     __tablename__ = "users"
     
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
+    google_id = Column(String, unique=True, index=True, nullable=False)
+    name = Column(String, nullable=False)
+    picture = Column(String)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    documents = relationship("Document", back_populates="owner")
-    chat_sessions = relationship("ChatSession", back_populates="user")
+    documents = relationship("Document", back_populates="user", cascade="all, delete-orphan")
+    chat_sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
 
 
 class Document(Base):
     __tablename__ = "documents"
     
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     filename = Column(String, nullable=False)
     original_filename = Column(String, nullable=False)
     file_path = Column(String, nullable=False)
-    file_type = Column(String, nullable=False)
     file_size = Column(Integer, nullable=False)
-    upload_date = Column(DateTime(timezone=True), server_default=func.now())
+    file_type = Column(String, nullable=False)
+    upload_date = Column(DateTime, default=datetime.utcnow)
     processed = Column(Boolean, default=False)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    processing_error = Column(Text)
+    chunk_count = Column(Integer, default=0)
     
     # Relationships
-    owner = relationship("User", back_populates="documents")
-    chunks = relationship("DocumentChunk", back_populates="document")
-
-
-class DocumentChunk(Base):
-    __tablename__ = "document_chunks"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    document_id = Column(Integer, ForeignKey("documents.id"))
-    chunk_text = Column(Text, nullable=False)
-    chunk_index = Column(Integer, nullable=False)
-    embedding_id = Column(String)  # ChromaDB ID
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
-    # Relationships
-    document = relationship("Document", back_populates="chunks")
+    user = relationship("User", back_populates="documents")
+    chat_sessions = relationship("ChatSession", back_populates="document", cascade="all, delete-orphan")
 
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, default="New Chat")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=True)
+    title = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     user = relationship("User", back_populates="chat_sessions")
-    messages = relationship("ChatMessage", back_populates="session")
+    document = relationship("Document", back_populates="chat_sessions")
+    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
 
 
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("chat_sessions.id"))
-    message = Column(Text, nullable=False)
-    response = Column(Text)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
+    role = Column(String, nullable=False)  # 'user' or 'assistant'
+    content = Column(Text, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    relevance_score = Column(Float)  # For retrieved context relevance
     
     # Relationships
     session = relationship("ChatSession", back_populates="messages") 
