@@ -2,11 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from .core.config import settings
-from .core.database import engine, Base
 from .api import documents, chat, auth, health
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# Tables are created by entrypoint.sh script before app starts
 
 app = FastAPI(
     title="ContextProvider API",
