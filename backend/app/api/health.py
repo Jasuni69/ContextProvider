@@ -41,7 +41,7 @@ async def health_check(db: Session = Depends(get_db)):
     
     # Check ChromaDB connectivity
     try:
-        chroma_host = os.getenv("CHROMA_HOST", "localhost")
+        chroma_host = os.getenv("CHROMA_HOST", "chromadb")
         chroma_port = os.getenv("CHROMA_PORT", "8000")
         
         async with httpx.AsyncClient() as client:
