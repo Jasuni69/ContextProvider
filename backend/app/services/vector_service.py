@@ -3,7 +3,12 @@ from chromadb.config import Settings
 from typing import List, Dict, Any, Optional
 import uuid
 import openai
+import os
 from ..core.config import settings
+
+# Completely disable ChromaDB telemetry
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+os.environ["CHROMA_TELEMETRY_IMPL"] = "none"
 
 
 class VectorService:
@@ -11,7 +16,11 @@ class VectorService:
         # Initialize ChromaDB client with OpenAI embeddings
         self.client = chromadb.PersistentClient(
             path=settings.chroma_persist_directory,
-            settings=Settings(anonymized_telemetry=False)
+            settings=Settings(
+                anonymized_telemetry=False,
+                allow_reset=True,
+                is_persistent=True
+            )
         )
         
         # Initialize OpenAI client

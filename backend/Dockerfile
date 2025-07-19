@@ -3,6 +3,8 @@ FROM python:3.11-slim
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV ANONYMIZED_TELEMETRY=False
+ENV CHROMA_TELEMETRY_IMPL=none
 
 # Set work directory
 WORKDIR /app

@@ -25,6 +25,7 @@ class DocumentResponse(BaseModel):
     processed: bool
     processing_error: Optional[str] = None
     chunk_count: int = 0
+    cancelled: bool = False
 
     class Config:
         from_attributes = True
@@ -150,10 +151,26 @@ async def delete_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
+    # Mark document as cancelled to stop ongoing processing
+    document.cancelled = True
+    db.commit()
+    
+    print(f"Cancelling processing for document {document_id}: {document.original_filename}")
+    
+    # Clean up vector data if any chunks were processed
+    try:
+        from ..services.vector_service import VectorService
+        vector_service = VectorService()
+        vector_service.delete_user_documents(document.user_id, document_id)
+        print(f"Cleaned up vector data for document {document_id}")
+    except Exception as e:
+        print(f"Error cleaning up vector data for document {document_id}: {e}")
+    
     # Delete physical file
     try:
         if os.path.exists(document.file_path):
             os.remove(document.file_path)
+            print(f"Deleted physical file: {document.file_path}")
     except Exception as e:
         print(f"Error deleting file: {e}")
     
@@ -161,7 +178,7 @@ async def delete_document(
     db.delete(document)
     db.commit()
     
-    return {"message": "Document deleted successfully"}
+    return {"message": "Document deleted successfully and processing cancelled"}
 
 
 def process_document_background(document_id: int, db: Session):
@@ -169,6 +186,12 @@ def process_document_background(document_id: int, db: Session):
     try:
         document = db.query(Document).filter(Document.id == document_id).first()
         if not document:
+            print(f"Document {document_id} not found, stopping processing")
+            return
+            
+        # Check if document was cancelled before starting
+        if document.cancelled:
+            print(f"Document {document_id} was cancelled before processing started")
             return
         
         print(f"Starting processing for document {document.id}: {document.original_filename}")
@@ -180,6 +203,12 @@ def process_document_background(document_id: int, db: Session):
         chunks = processor.process_document(document.file_path, document.file_type)
         
         print(f"Generated {len(chunks)} chunks for document {document.id}")
+        
+        # Check for cancellation again after chunk generation
+        db.refresh(document)
+        if document.cancelled:
+            print(f"Document {document_id} was cancelled during text processing")
+            return
         
         # Store chunks in vector database with batch processing
         from ..services.vector_service import VectorService
@@ -193,6 +222,18 @@ def process_document_background(document_id: int, db: Session):
         successful_chunks = 0
         
         for i in range(0, len(chunks), batch_size):
+            # Check for cancellation before each batch
+            db.refresh(document)
+            if document.cancelled:
+                print(f"Document {document_id} was cancelled during processing at chunk {i}")
+                # Clean up any chunks already processed
+                try:
+                    vector_service.delete_user_documents(document.user_id, document_id)
+                    print(f"Cleaned up {successful_chunks} partially processed chunks")
+                except Exception as e:
+                    print(f"Error cleaning up partial chunks: {e}")
+                return
+            
             batch = chunks[i:i + batch_size]
             
             print(f"Processing batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size} ({len(batch)} chunks)")
@@ -226,29 +267,42 @@ def process_document_background(document_id: int, db: Session):
                 time.sleep(1)
                 print(f"Completed batch, {successful_chunks}/{len(chunks)} chunks processed so far")
         
+        # Final check for cancellation before marking as complete
+        db.refresh(document)
+        if document.cancelled:
+            print(f"Document {document_id} was cancelled before completion")
+            # Clean up all processed chunks
+            try:
+                vector_service.delete_user_documents(document.user_id, document_id)
+                print(f"Cleaned up all {successful_chunks} processed chunks")
+            except Exception as e:
+                print(f"Error cleaning up chunks: {e}")
+            return
+        
         print(f"Completed processing: {successful_chunks}/{len(chunks)} chunks successfully stored")
         
-        # Update document status
-        document.processed = True
-        document.chunk_count = successful_chunks
-        document.processing_error = None
-        
-        if successful_chunks == 0:
-            document.processing_error = "No chunks were successfully processed"
-            document.processed = False
-        elif successful_chunks < len(chunks):
-            document.processing_error = f"Partial processing: {successful_chunks}/{len(chunks)} chunks stored"
-        
-        db.commit()
+        # Update document status only if not cancelled
+        if not document.cancelled:
+            document.processed = True
+            document.chunk_count = successful_chunks
+            document.processing_error = None
+            
+            if successful_chunks == 0:
+                document.processing_error = "No chunks were successfully processed"
+                document.processed = False
+            elif successful_chunks < len(chunks):
+                document.processing_error = f"Partial processing: {successful_chunks}/{len(chunks)} chunks stored"
+            
+            db.commit()
         
     except Exception as e:
-        # Update document with error
+        # Update document with error only if not cancelled
         print(f"Error processing document {document_id}: {e}")
         import traceback
         traceback.print_exc()
         
         document = db.query(Document).filter(Document.id == document_id).first()
-        if document:
+        if document and not document.cancelled:
             document.processed = False
             document.processing_error = str(e)
             db.commit()

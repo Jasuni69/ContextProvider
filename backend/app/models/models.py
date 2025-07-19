@@ -35,6 +35,7 @@ class Document(Base):
     processed = Column(Boolean, default=False)
     processing_error = Column(Text)
     chunk_count = Column(Integer, default=0)
+    cancelled = Column(Boolean, default=False)  # New field to track cancellation
     
     # Relationships
     user = relationship("User", back_populates="documents")
