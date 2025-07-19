@@ -51,8 +51,43 @@ class DocumentProcessor:
             return f.read()
     
     def _extract_from_csv(self, file_path: str) -> str:
-        """Extract text from CSV file"""
-        df = pd.read_csv(file_path)
+        """Extract text from CSV file with encoding detection"""
+        import chardet
+        
+        # First, detect the encoding
+        with open(file_path, 'rb') as f:
+            raw_data = f.read()
+            encoding_result = chardet.detect(raw_data)
+            detected_encoding = encoding_result.get('encoding', 'utf-8')
+        
+        print(f"Detected CSV encoding: {detected_encoding}")
+        
+        # Try different encodings in order of preference
+        encodings_to_try = [
+            detected_encoding,
+            'utf-8',
+            'utf-8-sig',  # UTF-8 with BOM
+            'latin1',     # ISO-8859-1
+            'cp1252',     # Windows-1252
+            'iso-8859-1',
+        ]
+        
+        for encoding in encodings_to_try:
+            try:
+                df = pd.read_csv(file_path, encoding=encoding)
+                print(f"Successfully read CSV with encoding: {encoding}")
+                break
+            except (UnicodeDecodeError, pd.errors.EmptyDataError) as e:
+                print(f"Failed to read CSV with encoding {encoding}: {e}")
+                continue
+        else:
+            # If all encodings fail, try with error handling
+            try:
+                df = pd.read_csv(file_path, encoding='utf-8', errors='replace')
+                print("Read CSV with UTF-8 and error replacement")
+            except Exception as e:
+                raise ValueError(f"Could not read CSV file with any encoding: {e}")
+        
         # Convert DataFrame to a readable text format
         text_content = f"CSV File Content:\n\n"
         text_content += f"Columns: {', '.join(df.columns.tolist())}\n\n"
@@ -63,7 +98,9 @@ class DocumentProcessor:
         for index, row in df.iterrows():
             text_content += f"\nRow {index + 1}:\n"
             for col in df.columns:
-                text_content += f"  {col}: {row[col]}\n"
+                # Handle potential encoding issues in cell values
+                cell_value = str(row[col]).encode('utf-8', errors='replace').decode('utf-8')
+                text_content += f"  {col}: {cell_value}\n"
             
             # Break after reasonable number of rows to avoid huge files
             if index >= 100:  # Limit to first 100 rows
