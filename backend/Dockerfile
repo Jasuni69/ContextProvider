@@ -29,8 +29,11 @@ COPY . /app/
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash appuser
+
 # Create uploads directory
-RUN mkdir -p /app/uploads && chown -R appuser:appuser /app/uploads
+RUN mkdir -p /app/uploads && chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
