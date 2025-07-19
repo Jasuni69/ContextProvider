@@ -8,8 +8,8 @@ from ..core.config import settings
 
 class DocumentProcessor:
     def __init__(self):
-        self.chunk_size = 1000
-        self.chunk_overlap = 200
+        self.chunk_size = 500  # Reduced from 1000 to prevent token limit issues
+        self.chunk_overlap = 100  # Reduced proportionally
     
     def save_uploaded_file(self, file_content: bytes, original_filename: str) -> Tuple[str, str]:
         """Save uploaded file and return file path and generated filename"""
@@ -51,7 +51,7 @@ class DocumentProcessor:
             return f.read()
     
     def _extract_from_csv(self, file_path: str) -> str:
-        """Extract text from CSV file with encoding detection"""
+        """Extract text from CSV file with encoding detection and optimized for chunking"""
         import chardet
         
         # First, detect the encoding
@@ -88,24 +88,64 @@ class DocumentProcessor:
             except Exception as e:
                 raise ValueError(f"Could not read CSV file with any encoding: {e}")
         
-        # Convert DataFrame to a readable text format
-        text_content = f"CSV File Content:\n\n"
-        text_content += f"Columns: {', '.join(df.columns.tolist())}\n\n"
-        text_content += f"Number of rows: {len(df)}\n\n"
-        text_content += "Data:\n"
+        # Create more efficient text representation for large datasets
+        text_content = f"CSV Dataset Analysis\n\n"
+        text_content += f"Dataset: {os.path.basename(file_path)}\n"
+        text_content += f"Columns ({len(df.columns)}): {', '.join(df.columns.tolist())}\n"
+        text_content += f"Total Rows: {len(df)}\n\n"
         
-        # Add each row as readable text
-        for index, row in df.iterrows():
-            text_content += f"\nRow {index + 1}:\n"
-            for col in df.columns:
-                # Handle potential encoding issues in cell values
-                cell_value = str(row[col]).encode('utf-8', errors='replace').decode('utf-8')
-                text_content += f"  {col}: {cell_value}\n"
+        # Add column descriptions and sample data
+        text_content += "Column Information:\n"
+        for col in df.columns:
+            col_info = f"- {col}: "
             
-            # Break after reasonable number of rows to avoid huge files
-            if index >= 100:  # Limit to first 100 rows
-                text_content += f"\n... (showing first 100 rows of {len(df)} total rows)"
-                break
+            # Add data type and sample values
+            dtype = str(df[col].dtype)
+            unique_count = df[col].nunique()
+            
+            if df[col].dtype in ['object', 'string']:
+                # For text columns, show unique values (limited)
+                unique_values = df[col].dropna().unique()[:5]
+                col_info += f"Text ({unique_count} unique values). Examples: {', '.join(str(v) for v in unique_values)}"
+            elif df[col].dtype in ['int64', 'float64']:
+                # For numeric columns, show range
+                min_val = df[col].min()
+                max_val = df[col].max()
+                col_info += f"Numeric (range: {min_val} to {max_val})"
+            else:
+                col_info += f"Type: {dtype}"
+                
+            text_content += col_info + "\n"
+        
+        text_content += "\n"
+        
+        # Add sample data (fewer rows, more manageable)
+        sample_size = min(20, len(df))  # Show max 20 rows instead of 100
+        text_content += f"Sample Data (first {sample_size} rows):\n\n"
+        
+        for index in range(sample_size):
+            row = df.iloc[index]
+            text_content += f"Row {index + 1}:\n"
+            for col in df.columns:
+                # Handle potential encoding issues and limit cell content length
+                cell_value = str(row[col]).encode('utf-8', errors='replace').decode('utf-8')
+                # Limit individual cell content to prevent massive values
+                if len(cell_value) > 100:
+                    cell_value = cell_value[:100] + "..."
+                text_content += f"  {col}: {cell_value}\n"
+            text_content += "\n"
+        
+        if len(df) > sample_size:
+            text_content += f"... ({len(df) - sample_size} more rows not shown for brevity)\n\n"
+        
+        # Add summary statistics for numeric columns
+        numeric_cols = df.select_dtypes(include=['number']).columns
+        if len(numeric_cols) > 0:
+            text_content += "Numeric Summary:\n"
+            for col in numeric_cols[:5]:  # Limit to 5 numeric columns
+                mean_val = df[col].mean()
+                text_content += f"  {col}: Average = {mean_val:.2f}\n"
+            text_content += "\n"
         
         return text_content
     
