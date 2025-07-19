@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Send, Bot, User, FileText } from 'lucide-react'
+import { Send, Bot, User, FileText, CheckCircle, Circle } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const Chat = () => {
@@ -7,6 +7,7 @@ const Chat = () => {
   const [inputMessage, setInputMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [documents, setDocuments] = useState([])
+  const [selectedDocumentId, setSelectedDocumentId] = useState(null)
   const messagesEndRef = useRef(null)
 
   const scrollToBottom = () => {
@@ -64,6 +65,7 @@ const Chat = () => {
         },
         body: JSON.stringify({
           message: inputMessage,
+          document_id: selectedDocumentId,
         }),
       })
 
@@ -108,7 +110,7 @@ const Chat = () => {
       <div className="max-w-4xl mx-auto h-[calc(100vh-8rem)] flex flex-col">
         {/* Header */}
         <div className="bg-white border-b border-gray-200 p-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Chat</h1>
               <p className="text-gray-600">
@@ -121,6 +123,73 @@ const Chat = () => {
               </div>
             )}
           </div>
+          
+          {/* Document Selection */}
+          {documents.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium text-gray-700">Select a document to chat about:</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {documents.map((doc) => (
+                  <div
+                    key={doc.id}
+                    onClick={() => setSelectedDocumentId(doc.id)}
+                    className={`p-3 border rounded-lg cursor-pointer transition-all duration-200 hover:shadow-md ${
+                      selectedDocumentId === doc.id
+                        ? 'border-primary-500 bg-primary-50 shadow-sm'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start space-x-3 flex-1 min-w-0">
+                        <FileText className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {doc.original_filename}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {Math.round(doc.file_size / 1024)} KB • {doc.chunk_count} chunks
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex-shrink-0 ml-2">
+                        {selectedDocumentId === doc.id ? (
+                          <CheckCircle className="w-5 h-5 text-primary-600" />
+                        ) : (
+                          <Circle className="w-5 h-5 text-gray-300" />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Selected Document Info */}
+              {selectedDocumentId && (
+                <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle className="w-4 h-4 text-green-600" />
+                    <span className="text-sm text-green-800">
+                      Ready to chat about: <strong>
+                        {documents.find(doc => doc.id === selectedDocumentId)?.original_filename}
+                      </strong>
+                    </span>
+                  </div>
+                </div>
+              )}
+              
+              {/* No Selection Warning */}
+              {!selectedDocumentId && (
+                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <Circle className="w-4 h-4 text-amber-600" />
+                    <span className="text-sm text-amber-800">
+                      Please select a document above to start chatting about it
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Messages */}
@@ -214,23 +283,43 @@ const Chat = () => {
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Ask a question about your documents..."
+                placeholder={
+                  selectedDocumentId 
+                    ? `Ask questions about ${documents.find(doc => doc.id === selectedDocumentId)?.original_filename}...`
+                    : documents.length > 0 
+                      ? "Select a document above, then ask questions about it..."
+                      : "Upload documents first to start chatting..."
+                }
                 className="input-field resize-none"
                 rows="2"
-                disabled={isLoading || documents.length === 0}
+                disabled={isLoading || documents.length === 0 || !selectedDocumentId}
               />
             </div>
             <button
               onClick={sendMessage}
-              disabled={!inputMessage.trim() || isLoading || documents.length === 0}
+              disabled={!inputMessage.trim() || isLoading || documents.length === 0 || !selectedDocumentId}
               className="btn-primary self-end flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send className="w-4 h-4" />
             </button>
           </div>
+          
+          {/* Status Messages */}
           {documents.length === 0 && (
             <p className="text-sm text-gray-500 mt-2">
               Upload and process some documents to start chatting!
+            </p>
+          )}
+          
+          {documents.length > 0 && !selectedDocumentId && (
+            <p className="text-sm text-amber-600 mt-2">
+              Select a document above to start asking questions about it.
+            </p>
+          )}
+          
+          {selectedDocumentId && (
+            <p className="text-sm text-green-600 mt-2">
+              Ready to chat about {documents.find(doc => doc.id === selectedDocumentId)?.original_filename}
             </p>
           )}
         </div>

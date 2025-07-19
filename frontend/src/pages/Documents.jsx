@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, FileText, Trash2, Eye, CheckCircle, Clock } from 'lucide-react'
+import { Upload, FileText, Trash2, Eye, CheckCircle, Clock, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const Documents = () => {
   const [documents, setDocuments] = useState([])
   const [uploading, setUploading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const refreshIntervalRef = useRef(null)
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: {
@@ -46,8 +48,9 @@ const Documents = () => {
     setUploading(false)
   }
 
-  async function fetchDocuments() {
+  async function fetchDocuments(showRefreshing = false) {
     try {
+      if (showRefreshing) setRefreshing(true)
       const response = await fetch('/api/documents/')
       if (response.ok) {
         const data = await response.json()
@@ -55,8 +58,17 @@ const Documents = () => {
       }
     } catch (error) {
       console.error('Error fetching documents:', error)
+    } finally {
+      if (showRefreshing) setRefreshing(false)
     }
   }
+
+  const handleManualRefresh = () => {
+    fetchDocuments(true)
+  }
+
+  // Check if there are any processing documents to determine if we should continue polling
+  const hasProcessingDocuments = documents.some(doc => !doc.processed && !doc.processing_error)
 
   async function deleteDocument(documentId) {
     if (!confirm('Are you sure you want to delete this document?')) return
@@ -79,7 +91,16 @@ const Documents = () => {
 
   useEffect(() => {
     fetchDocuments()
-  }, [])
+    
+    // Only set up interval if there are processing documents
+    if (hasProcessingDocuments) {
+      refreshIntervalRef.current = setInterval(() => fetchDocuments(), 3000) // Refresh every 3 seconds
+    } else {
+      clearInterval(refreshIntervalRef.current)
+    }
+    
+    return () => clearInterval(refreshIntervalRef.current)
+  }, [hasProcessingDocuments])
 
   const formatFileSize = (bytes) => {
     if (bytes === 0) return '0 Bytes'
@@ -96,10 +117,28 @@ const Documents = () => {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Documents</h1>
-        <p className="text-gray-600">
-          Upload and manage your documents. Supported formats: CSV, PDF, TXT
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Documents</h1>
+            <p className="text-gray-600">
+              Upload and manage your documents. Supported formats: CSV, PDF, TXT
+            </p>
+            {hasProcessingDocuments && (
+              <p className="text-sm text-blue-600 mt-1 flex items-center">
+                <Clock className="w-4 h-4 mr-1 animate-spin" />
+                {documents.filter(doc => !doc.processed && !doc.processing_error).length} document(s) processing... (auto-refreshing)
+              </p>
+            )}
+          </div>
+          <button
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+            className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <span className="text-sm font-medium">{refreshing ? 'Refreshing...' : 'Refresh'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Upload Area */}
@@ -171,20 +210,52 @@ const Documents = () => {
                       <span>•</span>
                       <span>{new Date(doc.upload_date).toLocaleDateString()}</span>
                       <span>•</span>
-                      <div className="flex items-center">
-                        {doc.processed ? (
+                      
+                      {/* Status with Progress */}
+                      <div className="flex items-center space-x-2">
+                        {doc.processing_error ? (
                           <>
-                            <CheckCircle className="w-4 h-4 text-green-500 mr-1" />
-                            <span className="text-green-600">Processed</span>
+                            <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                              <span className="text-white text-xs">✕</span>
+                            </div>
+                            <span className="text-red-600">Failed</span>
+                          </>
+                        ) : doc.processed ? (
+                          <>
+                            <CheckCircle className="w-4 h-4 text-green-500" />
+                            <span className="text-green-600">Processed ({doc.chunk_count} chunks)</span>
                           </>
                         ) : (
                           <>
-                            <Clock className="w-4 h-4 text-yellow-500 mr-1" />
-                            <span className="text-yellow-600">Processing</span>
+                            <div className="flex items-center space-x-2">
+                              <div className="relative">
+                                <Clock className="w-4 h-4 text-blue-500 animate-spin" />
+                              </div>
+                              <span className="text-blue-600">Processing...</span>
+                            </div>
                           </>
                         )}
                       </div>
                     </div>
+                    
+                    {/* Progress Bar for Processing Documents */}
+                    {!doc.processed && !doc.processing_error && (
+                      <div className="mt-2">
+                        <div className="flex items-center space-x-2 text-xs text-gray-500">
+                          <span>Processing document</span>
+                        </div>
+                        <div className="mt-1 w-full bg-gray-200 rounded-full h-2">
+                          <div className="bg-blue-500 h-2 rounded-full animate-pulse" style={{ width: '60%' }}></div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Error Details */}
+                    {doc.processing_error && (
+                      <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                        <strong>Error:</strong> {doc.processing_error}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center space-x-2">
