@@ -4,14 +4,12 @@ import pandas as pd
 import fitz  # PyMuPDF
 from typing import List, Tuple
 from ..core.config import settings
-from .semantic_chunker import HybridChunker
 
 
 class DocumentProcessor:
     def __init__(self):
         self.chunk_size = 1000
         self.chunk_overlap = 200
-        self.semantic_chunker = HybridChunker()
     
     def save_uploaded_file(self, file_content: bytes, original_filename: str) -> Tuple[str, str]:
         """Save uploaded file and return file path and generated filename"""
@@ -48,100 +46,72 @@ class DocumentProcessor:
         text_content += f"Columns: {', '.join(df.columns.tolist())}\n\n"
         text_content += f"Number of rows: {len(df)}\n\n"
         text_content += "Data:\n"
-        text_content += df.to_string(index=False)
+        
+        # Add each row as readable text
+        for index, row in df.iterrows():
+            text_content += f"\nRow {index + 1}:\n"
+            for col in df.columns:
+                text_content += f"  {col}: {row[col]}\n"
+            
+            # Break after reasonable number of rows to avoid huge files
+            if index >= 100:  # Limit to first 100 rows
+                text_content += f"\n... (showing first 100 rows of {len(df)} total rows)"
+                break
+        
         return text_content
     
     def _extract_from_pdf(self, file_path: str) -> str:
         """Extract text from PDF file"""
-        doc = fitz.open(file_path)
-        text_content = ""
-        
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
-            text_content += f"\n--- Page {page_num + 1} ---\n"
-            text_content += page.get_text()
-        
-        doc.close()
-        return text_content
+        text = ""
+        with fitz.open(file_path) as pdf:
+            for page in pdf:
+                text += page.get_text()
+        return text
     
-    def chunk_text(self, text: str, file_type: str = 'general') -> List[str]:
+    def chunk_text(self, text: str, file_type: str = None) -> List[str]:
         """
-        Split text into semantic chunks that respect topic boundaries
-        """
-        # Determine document type for optimal chunking strategy
-        document_type = self._determine_document_type(text, file_type)
-        
-        # Use semantic chunking
-        chunks = self.semantic_chunker.chunk_text(text, document_type)
-        
-        # Fallback to old method if semantic chunking produces no results
-        if not chunks:
-            chunks = self._fallback_chunk_text(text)
-        
-        return chunks
-    
-    def _determine_document_type(self, text: str, file_type: str) -> str:
-        """
-        Determine the best chunking strategy based on document characteristics
-        """
-        # Check for structured document indicators
-        structured_indicators = [
-            r'^#{1,6}\s+',  # Markdown headers
-            r'^\d+\.\s+[A-Z]',  # Numbered sections
-            r'^[A-Z][A-Z\s]+:',  # ALL CAPS headers
-            r'Chapter \d+',  # Chapter indicators
-            r'Section \d+',  # Section indicators
-        ]
-        
-        import re
-        for pattern in structured_indicators:
-            if re.search(pattern, text, re.MULTILINE):
-                return 'structured'
-        
-        # CSV files are typically structured
-        if file_type == 'csv':
-            return 'structured'
-        
-        return 'general'
-    
-    def _fallback_chunk_text(self, text: str) -> List[str]:
-        """
-        Fallback to the original chunking method if semantic chunking fails
+        Create text chunks using intelligent sentence-aware splitting
         """
         if len(text) <= self.chunk_size:
             return [text]
         
-        chunks = []
-        start = 0
+        # Split into sentences first (simple approach)
+        sentences = self._split_into_sentences(text)
         
-        while start < len(text):
-            end = start + self.chunk_size
-            
-            # If we're not at the end, try to break at a sentence or word boundary
-            if end < len(text):
-                # Look for sentence boundary
-                sentence_end = text.rfind('.', start, end)
-                if sentence_end > start:
-                    end = sentence_end + 1
-                else:
-                    # Look for word boundary
-                    word_end = text.rfind(' ', start, end)
-                    if word_end > start:
-                        end = word_end
-            
-            chunk = text[start:end].strip()
-            if chunk:
-                chunks.append(chunk)
-            
-            # Move start position with overlap
-            start = end - self.chunk_overlap if end < len(text) else end
+        chunks = []
+        current_chunk = ""
+        
+        for sentence in sentences:
+            # If adding this sentence would exceed chunk size, finalize current chunk
+            if len(current_chunk) + len(sentence) > self.chunk_size and current_chunk:
+                chunks.append(current_chunk.strip())
+                # Start new chunk with overlap from the end of previous chunk
+                overlap_text = self._get_overlap_text(current_chunk)
+                current_chunk = overlap_text + sentence
+            else:
+                current_chunk += sentence
+        
+        # Add the last chunk if it has content
+        if current_chunk.strip():
+            chunks.append(current_chunk.strip())
         
         return chunks
     
-    def get_file_info(self, file_path: str) -> dict:
-        """Get file information"""
-        file_size = os.path.getsize(file_path)
-        return {
-            "size": file_size,
-            "exists": os.path.exists(file_path)
-        } 
+    def _split_into_sentences(self, text: str) -> List[str]:
+        """Simple sentence splitting based on punctuation"""
+        import re
+        # Split on sentence endings, keeping the punctuation
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        return [s.strip() + ' ' for s in sentences if s.strip()]
+    
+    def _get_overlap_text(self, text: str) -> str:
+        """Get overlap text from the end of current chunk"""
+        if len(text) <= self.chunk_overlap:
+            return text
+        
+        # Try to get overlap at word boundary
+        overlap = text[-self.chunk_overlap:]
+        space_index = overlap.find(' ')
+        if space_index != -1:
+            return overlap[space_index:] + ' '
+        return overlap + ' ' 

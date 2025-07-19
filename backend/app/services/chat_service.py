@@ -69,31 +69,35 @@ class ChatService:
             return f"I apologize, but I encountered an error: {str(e)}"
     
     def _generate_openai_response(self, query: str, context: str) -> str:
-        """Generate response using OpenAI with document context"""
+        """Generate response using OpenAI GPT-3.5-turbo"""
         try:
-            prompt = f"""Based on the following document content, please answer the user's question. If the information is not available in the provided context, please say so clearly.
-
-Document Content:
+            system_prompt = """You are a helpful AI assistant that answers questions based on the provided document context. 
+            Use only the information from the provided context to answer questions. 
+            If the context doesn't contain enough information to answer the question, say so clearly.
+            Be concise but thorough in your responses."""
+            
+            user_prompt = f"""Context from documents:
 {context}
 
-User Question: {query}
+Question: {query}
 
-Please provide a clear, accurate answer based on the document content:"""
+Please answer the question based on the provided context."""
 
-            response = openai.ChatCompletion.create(
+            response = openai.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a helpful AI assistant that answers questions based on provided document content. Be accurate and cite the information when possible."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
                 ],
                 max_tokens=500,
-                temperature=0.3
+                temperature=0.1
             )
             
             return response.choices[0].message.content.strip()
             
         except Exception as e:
-            return f"I apologize, but I encountered an error generating the response: {str(e)}"
+            print(f"OpenAI API error: {e}")
+            return self._generate_fallback_response(query, context)
     
     def _generate_fallback_response(self, query: str, context: str) -> str:
         """Generate fallback response when OpenAI is not available"""
