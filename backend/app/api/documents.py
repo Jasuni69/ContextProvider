@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
 import os
@@ -23,7 +23,7 @@ class DocumentResponse(BaseModel):
     file_type: str
     upload_date: datetime
     processed: bool
-    processing_error: str = None
+    processing_error: Optional[str] = None
     chunk_count: int = 0
 
     class Config:
