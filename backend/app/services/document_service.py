@@ -33,6 +33,18 @@ class DocumentProcessor:
         else:
             raise ValueError(f"Unsupported file type: {file_type}")
     
+    def process_document(self, file_path: str, file_type: str) -> List[str]:
+        """
+        Complete document processing: extract text and create chunks
+        """
+        # Extract text from file
+        text = self.extract_text_from_file(file_path, file_type)
+        
+        # Create chunks
+        chunks = self.chunk_text(text, file_type)
+        
+        return chunks
+    
     def _extract_from_txt(self, file_path: str) -> str:
         """Extract text from TXT file"""
         with open(file_path, 'r', encoding='utf-8') as f:
