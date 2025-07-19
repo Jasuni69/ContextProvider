@@ -23,19 +23,53 @@ class ChatService:
                 user_filter={"user_id": user_id}
             )
             
+            print(f"Search results type: {type(search_results)}")
+            print(f"Search results: {search_results}")
+            
             if not search_results or not search_results.get('documents'):
                 return "I couldn't find relevant information in the document to answer your question.", 0.0
             
             # Extract relevant chunks and calculate average relevance
-            relevant_chunks = search_results['documents'][0]  # First result set
-            distances = search_results.get('distances', [[1.0] * len(relevant_chunks)])[0]
+            documents = search_results.get('documents', [])
+            distances = search_results.get('distances', [])
+            
+            print(f"Documents type: {type(documents)}, content: {documents}")
+            print(f"Distances type: {type(distances)}, content: {distances}")
+            
+            if not documents:
+                return "No relevant chunks found in the document.", 0.0
+            
+            # Handle different result formats
+            if isinstance(documents, list) and len(documents) > 0:
+                if isinstance(documents[0], list):
+                    relevant_chunks = documents[0]  # Nested list format
+                else:
+                    relevant_chunks = documents  # Flat list format
+            else:
+                return "No relevant chunks found.", 0.0
+            
+            # Handle distances
+            if distances and isinstance(distances, list) and len(distances) > 0:
+                if isinstance(distances[0], list):
+                    dist_list = distances[0]  # Nested list format
+                else:
+                    dist_list = distances  # Flat list format
+            else:
+                dist_list = [1.0] * len(relevant_chunks)  # Default distances
             
             # Convert distances to relevance scores (lower distance = higher relevance)
-            relevance_scores = [1.0 - min(dist, 1.0) for dist in distances]
-            avg_relevance = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0.0
+            try:
+                relevance_scores = [1.0 - min(float(dist), 1.0) for dist in dist_list]
+                avg_relevance = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0.0
+            except (TypeError, ValueError) as e:
+                print(f"Error processing distances: {e}")
+                avg_relevance = 0.5  # Default relevance
             
             # Create context from relevant chunks
-            context = "\n\n".join(relevant_chunks[:3])  # Use top 3 chunks
+            if relevant_chunks:
+                context = "\n\n".join(str(chunk) for chunk in relevant_chunks[:3])  # Use top 3 chunks
+            else:
+                context = "No relevant content found."
             
             # Generate response using OpenAI
             if settings.openai_api_key:
@@ -46,6 +80,9 @@ class ChatService:
             return response, avg_relevance
             
         except Exception as e:
+            print(f"Error in get_document_response: {e}")
+            import traceback
+            traceback.print_exc()
             return f"I apologize, but I encountered an error while processing your question: {str(e)}", 0.0
     
     def get_general_response(self, query: str) -> str:
