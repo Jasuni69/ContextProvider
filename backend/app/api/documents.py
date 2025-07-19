@@ -165,11 +165,13 @@ async def delete_document(
 
 
 def process_document_background(document_id: int, db: Session):
-    """Background task to process uploaded document"""
+    """Background task to process uploaded document with batch processing for large datasets"""
     try:
         document = db.query(Document).filter(Document.id == document_id).first()
         if not document:
             return
+        
+        print(f"Starting processing for document {document.id}: {document.original_filename}")
         
         # Initialize document processor
         processor = DocumentProcessor()
@@ -177,33 +179,74 @@ def process_document_background(document_id: int, db: Session):
         # Process the document
         chunks = processor.process_document(document.file_path, document.file_type)
         
-        # Store chunks in vector database
+        print(f"Generated {len(chunks)} chunks for document {document.id}")
+        
+        # Store chunks in vector database with batch processing
         from ..services.vector_service import VectorService
         vector_service = VectorService()
         
         # Create document collection ID
         collection_id = f"doc_{document.id}"
         
-        # Store chunks with metadata
-        for i, chunk in enumerate(chunks):
-            metadata = {
-                "document_id": document.id,
-                "user_id": document.user_id,
-                "chunk_index": i,
-                "filename": document.original_filename,
-                "file_type": document.file_type
-            }
-            vector_service.add_document(collection_id, chunk, metadata)
+        # Process chunks in batches to avoid overwhelming ChromaDB and OpenAI
+        batch_size = 10  # Process 10 chunks at a time
+        successful_chunks = 0
+        
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            
+            print(f"Processing batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size} ({len(batch)} chunks)")
+            
+            for j, chunk in enumerate(batch):
+                try:
+                    chunk_index = i + j
+                    metadata = {
+                        "document_id": document.id,
+                        "user_id": document.user_id,
+                        "chunk_index": chunk_index,
+                        "filename": document.original_filename,
+                        "file_type": document.file_type
+                    }
+                    
+                    vector_service.add_document(collection_id, chunk, metadata)
+                    successful_chunks += 1
+                    
+                    # Small delay to avoid overwhelming the API
+                    import time
+                    time.sleep(0.1)
+                    
+                except Exception as e:
+                    print(f"Error processing chunk {chunk_index}: {e}")
+                    # Continue with next chunk rather than failing entirely
+                    continue
+            
+            # Longer delay between batches
+            if i + batch_size < len(chunks):
+                import time
+                time.sleep(1)
+                print(f"Completed batch, {successful_chunks}/{len(chunks)} chunks processed so far")
+        
+        print(f"Completed processing: {successful_chunks}/{len(chunks)} chunks successfully stored")
         
         # Update document status
         document.processed = True
-        document.chunk_count = len(chunks)
+        document.chunk_count = successful_chunks
         document.processing_error = None
+        
+        if successful_chunks == 0:
+            document.processing_error = "No chunks were successfully processed"
+            document.processed = False
+        elif successful_chunks < len(chunks):
+            document.processing_error = f"Partial processing: {successful_chunks}/{len(chunks)} chunks stored"
         
         db.commit()
         
     except Exception as e:
         # Update document with error
+        print(f"Error processing document {document_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        
         document = db.query(Document).filter(Document.id == document_id).first()
         if document:
             document.processed = False

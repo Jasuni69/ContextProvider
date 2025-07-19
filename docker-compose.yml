@@ -49,6 +49,10 @@ services:
       - "8001:8000"
     volumes:
       - chroma_data:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=False
+      - ALLOW_RESET=True
+      - CHROMA_SERVER_NOFILE=65536
     networks:
       - contextprovider-network
     restart: unless-stopped
