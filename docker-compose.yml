@@ -33,6 +33,9 @@ services:
     environment:
       - ANONYMIZED_TELEMETRY=False
       - CHROMA_TELEMETRY_IMPL=none
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_chroma:/app/chroma_db
     depends_on:
       - chromadb
     networks:
@@ -67,6 +70,8 @@ services:
 
 volumes:
   chroma_data:
+  backend_uploads:
+  backend_chroma:
 
 networks:
   contextprovider-network:
