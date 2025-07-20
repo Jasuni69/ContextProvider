@@ -13,15 +13,32 @@ os.environ["CHROMA_TELEMETRY_IMPL"] = "none"
 
 class VectorService:
     def __init__(self):
-        # Initialize ChromaDB client with OpenAI embeddings
-        self.client = chromadb.PersistentClient(
-            path=settings.chroma_persist_directory,
-            settings=Settings(
-                anonymized_telemetry=False,
-                allow_reset=True,
-                is_persistent=True
+        # Initialize ChromaDB client with simpler configuration to avoid tenant issues
+        try:
+            # First try with PersistentClient
+            self.client = chromadb.PersistentClient(
+                path=settings.chroma_persist_directory,
+                settings=Settings(
+                    anonymized_telemetry=False,
+                    allow_reset=True,
+                    is_persistent=True
+                )
             )
-        )
+            print(f"✅ ChromaDB PersistentClient initialized at: {settings.chroma_persist_directory}")
+        except Exception as e:
+            print(f"⚠️  PersistentClient failed ({e}), trying simpler Client...")
+            try:
+                # Fallback to simpler in-memory client
+                self.client = chromadb.Client(
+                    settings=Settings(
+                        anonymized_telemetry=False,
+                        allow_reset=True
+                    )
+                )
+                print("✅ ChromaDB Client (in-memory) initialized")
+            except Exception as e2:
+                print(f"❌ All ChromaDB clients failed: {e2}")
+                raise e2
         
         # Initialize OpenAI client
         openai.api_key = settings.openai_api_key
